@@ -1,0 +1,27 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+bin/
+build/
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data output (keep structure, not bulk results)
+data/*.csv
+data/*.txt
+!data/.gitkeep
+
+# Debug
+core
+*.dSYM/

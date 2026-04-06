@@ -26,6 +26,7 @@ TWO32 = 1 << 32
 K_VALUES = (0.2, 0.45, 0.8)
 PERSISTENCE_KS = (0.45, 0.8)
 MOTIF_DEPTHS = (1, 2, 3)
+K_SWEEP = (0.2, 0.3, 0.45, 0.6, 0.8)
 SHIFT_CONTROL = 17
 
 SHA256_CONSTANTS = [
@@ -96,14 +97,45 @@ def first_nonprimes(count: int) -> list[int]:
     return composites
 
 
-def cube_root_constant(value: int) -> int:
+def nth_root_constant(value: int, degree: int) -> int:
     getcontext().prec = 80
     decimal_value = Decimal(value)
-    guess = decimal_value ** (Decimal(1) / Decimal(3))
+    guess = decimal_value ** (Decimal(1) / Decimal(degree))
     for _ in range(14):
-        guess = (2 * guess + decimal_value / (guess * guess)) / 3
+        guess = ((degree - 1) * guess + decimal_value / (guess ** (degree - 1))) / degree
     fractional = guess - int(guess)
     return int(fractional * TWO32)
+
+
+def cube_root_constant(value: int) -> int:
+    return nth_root_constant(value, 3)
+
+
+def first_semiprimes(count: int) -> list[int]:
+    semiprimes: list[int] = []
+    candidate = 4
+    while len(semiprimes) < count:
+        factor_count = 0
+        residue = candidate
+        divisor = 2
+        while divisor * divisor <= residue and factor_count <= 2:
+            while residue % divisor == 0:
+                factor_count += 1
+                residue //= divisor
+                if factor_count > 2:
+                    break
+            divisor += 1
+        if residue > 1:
+            factor_count += 1
+        if factor_count == 2:
+            semiprimes.append(candidate)
+        candidate += 1
+    return semiprimes
+
+
+def prime_slice(start: int, count: int) -> list[int]:
+    primes = first_primes(start + count)
+    return primes[start:start + count]
 
 
 def rankdata(values: list[float]) -> list[int]:
@@ -214,6 +246,28 @@ def motif_overlap_fraction(
                 overlap_total += len(source_set & target_set)
         overlap_by_depth[depth] = overlap_total / normalizer
     return overlap_by_depth
+
+
+def single_k_motif_stats(
+    sources: list[int],
+    targets: list[int],
+    depth: int,
+    k_value: float,
+) -> dict[str, float]:
+    real_score = motif_overlap_fraction(sources, targets, (depth,), (k_value,))[depth]
+    shifted_scores = []
+    for offset in range(1, len(targets)):
+        shifted_targets = rotate(targets, offset)
+        shifted = motif_overlap_fraction(sources, shifted_targets, (depth,), (k_value,))
+        shifted_scores.append(shifted[depth])
+
+    shift_mean = float(np.mean(shifted_scores))
+    return {
+        "real_overlap": real_score,
+        "shift_mean": shift_mean,
+        "amplification_ratio": real_score / shift_mean if shift_mean > 0.0 else float("nan"),
+        "absolute_lift": real_score - shift_mean,
+    }
 
 
 def plot_shift_spectrum(output_dir: Path, sources: list[int], targets: list[int]) -> None:
@@ -407,6 +461,171 @@ def plot_motif_amplification(output_dir: Path) -> list[dict[str, float]]:
     return rows
 
 
+def plot_stronger_controls(output_dir: Path) -> list[dict[str, float]]:
+    odd_nonprimes = [value for value in first_nonprimes(256) if value % 2 == 1][:64]
+    control_families = [
+        ("SHA primes cube-3", first_primes(64), SHA256_CONSTANTS),
+        ("Same primes sqrt", first_primes(64), [nth_root_constant(v, 2) for v in first_primes(64)]),
+        ("Same primes fifth", first_primes(64), [nth_root_constant(v, 5) for v in first_primes(64)]),
+        ("Next 64 primes cube-3", prime_slice(64, 64), [cube_root_constant(v) for v in prime_slice(64, 64)]),
+        ("Odd nonprimes cube-3", odd_nonprimes, [cube_root_constant(v) for v in odd_nonprimes]),
+        ("Semiprimes cube-3", first_semiprimes(64), [cube_root_constant(v) for v in first_semiprimes(64)]),
+    ]
+    palette = ["#1f78b4", "#33a02c", "#6a3d9a", "#ff7f00", "#b15928", "#e31a1c"]
+    rows: list[dict[str, float]] = []
+    x_positions = np.arange(len(control_families))
+    width = 0.22
+
+    figure, axes = plt.subplots(1, 2, figsize=(15, 5), constrained_layout=True)
+    for depth_index, depth in enumerate(MOTIF_DEPTHS):
+        ratios = []
+        lifts = []
+        for label, sources, targets in control_families:
+            real_scores = motif_overlap_fraction(sources, targets, (depth,), PERSISTENCE_KS)
+            shift_values = []
+            for offset in range(1, len(targets)):
+                shifted_targets = rotate(targets, offset)
+                shifted_scores = motif_overlap_fraction(sources, shifted_targets, (depth,), PERSISTENCE_KS)
+                shift_values.append(shifted_scores[depth])
+            shift_mean = float(np.mean(shift_values))
+            real_value = real_scores[depth]
+            ratio_value = real_value / shift_mean if shift_mean > 0.0 else float("nan")
+            lift_value = real_value - shift_mean
+            ratios.append(ratio_value)
+            lifts.append(lift_value)
+            rows.append(
+                {
+                    "family": label,
+                    "depth": depth,
+                    "real_overlap": real_value,
+                    "shift_mean": shift_mean,
+                    "amplification_ratio": ratio_value,
+                    "absolute_lift": lift_value,
+                }
+            )
+
+        offsets = x_positions + (depth_index - 1) * width
+        axes[0].bar(offsets, ratios, width=width, color=palette[depth_index], label=f"G{depth}")
+        axes[1].bar(offsets, lifts, width=width, color=palette[depth_index], label=f"G{depth}")
+
+    for axis in axes:
+        axis.set_xticks(x_positions)
+        axis.set_xticklabels([label for label, _, _ in control_families], rotation=20, ha="right")
+        axis.grid(axis="y", alpha=0.2)
+
+    axes[0].axhline(1.0, color="#555555", linestyle=":", linewidth=1)
+    axes[0].set_title("Amplification ratio by control family")
+    axes[0].set_ylabel("Real overlap / mean shifted overlap")
+    axes[0].legend(loc="upper right")
+
+    axes[1].axhline(0.0, color="#555555", linestyle=":", linewidth=1)
+    axes[1].set_title("Absolute lift by control family")
+    axes[1].set_ylabel("Real overlap - mean shifted overlap")
+
+    figure.suptitle("Stronger deterministic controls for source and transform specificity")
+    figure.savefig(output_dir / "prime_survival_stronger_controls.png", dpi=180)
+    plt.close(figure)
+    return rows
+
+
+def plot_family_transform_sweep(output_dir: Path) -> list[dict[str, float]]:
+    odd_nonprimes = [value for value in first_nonprimes(256) if value % 2 == 1][:64]
+    families = [
+        ("First 64 primes", first_primes(64)),
+        ("Next 64 primes", prime_slice(64, 64)),
+        ("Odd nonprimes", odd_nonprimes),
+        ("Semiprimes", first_semiprimes(64)),
+        ("Integers 2..65", list(range(2, 66))),
+    ]
+    transforms = [
+        ("sqrt", lambda values: [nth_root_constant(v, 2) for v in values]),
+        ("cube-3", lambda values: [nth_root_constant(v, 3) for v in values]),
+        ("fifth", lambda values: [nth_root_constant(v, 5) for v in values]),
+    ]
+
+    best_lift = {1: np.zeros((len(families), len(transforms))), 2: np.zeros((len(families), len(transforms)))}
+    best_k = {1: np.zeros((len(families), len(transforms))), 2: np.zeros((len(families), len(transforms)))}
+    rows: list[dict[str, float]] = []
+
+    for family_index, (family_label, sources) in enumerate(families):
+        for transform_index, (transform_label, transform_fn) in enumerate(transforms):
+            targets = transform_fn(sources)
+            for depth in (1, 2):
+                best_stats = None
+                best_k_value = None
+                for k_value in K_SWEEP:
+                    stats = single_k_motif_stats(sources, targets, depth, k_value)
+                    if best_stats is None or stats["absolute_lift"] > best_stats["absolute_lift"]:
+                        best_stats = stats
+                        best_k_value = k_value
+                assert best_stats is not None
+                best_lift[depth][family_index, transform_index] = best_stats["absolute_lift"]
+                best_k[depth][family_index, transform_index] = best_k_value
+                rows.append(
+                    {
+                        "family": family_label,
+                        "transform": transform_label,
+                        "depth": depth,
+                        "best_k": best_k_value,
+                        "best_lift": best_stats["absolute_lift"],
+                        "best_ratio": best_stats["amplification_ratio"],
+                        "real_overlap": best_stats["real_overlap"],
+                        "shift_mean": best_stats["shift_mean"],
+                    }
+                )
+
+    figure, axes = plt.subplots(2, 2, figsize=(12, 7.5), constrained_layout=True)
+    cmap_lift = "YlGnBu"
+    cmap_k = "magma"
+
+    for row_index, depth in enumerate((1, 2)):
+        lift_ax = axes[row_index, 0]
+        k_ax = axes[row_index, 1]
+
+        lift_image = lift_ax.imshow(best_lift[depth], cmap=cmap_lift, aspect="auto")
+        k_image = k_ax.imshow(best_k[depth], cmap=cmap_k, aspect="auto", vmin=min(K_SWEEP), vmax=max(K_SWEEP))
+
+        lift_ax.set_title(f"G{depth} max absolute lift")
+        k_ax.set_title(f"G{depth} best k")
+
+        for axis in (lift_ax, k_ax):
+            axis.set_xticks(np.arange(len(transforms)))
+            axis.set_xticklabels([label for label, _ in transforms])
+            axis.set_yticks(np.arange(len(families)))
+            axis.set_yticklabels([label for label, _ in families])
+
+        for family_index in range(len(families)):
+            for transform_index in range(len(transforms)):
+                lift_value = best_lift[depth][family_index, transform_index]
+                k_value = best_k[depth][family_index, transform_index]
+                lift_ax.text(
+                    transform_index,
+                    family_index,
+                    f"{lift_value:.3f}",
+                    ha="center",
+                    va="center",
+                    color="black",
+                    fontsize=8,
+                )
+                k_ax.text(
+                    transform_index,
+                    family_index,
+                    f"{k_value:.2f}",
+                    ha="center",
+                    va="center",
+                    color="white",
+                    fontsize=8,
+                )
+
+        figure.colorbar(lift_image, ax=lift_ax, fraction=0.046, pad=0.04)
+        figure.colorbar(k_image, ax=k_ax, fraction=0.046, pad=0.04)
+
+    figure.suptitle("Family x transform sweep over k in {0.2, 0.3, 0.45, 0.6, 0.8}")
+    figure.savefig(output_dir / "prime_survival_family_transform_sweep.png", dpi=180)
+    plt.close(figure)
+    return rows
+
+
 def verify_sha_constants() -> None:
     derived = [cube_root_constant(value) for value in first_primes(64)]
     if derived != SHA256_CONSTANTS:
@@ -425,6 +644,8 @@ def main() -> None:
     plot_rank_transfer(output_dir, prime_sources)
     summary_rows = plot_summary_metrics(output_dir)
     motif_rows = plot_motif_amplification(output_dir)
+    control_rows = plot_stronger_controls(output_dir)
+    sweep_rows = plot_family_transform_sweep(output_dir)
 
     best_prime_row = max(
         (row for row in summary_rows if row["dataset"] == "Primes"),
@@ -433,6 +654,18 @@ def main() -> None:
     best_motif_row = max(
         (row for row in motif_rows if row["dataset"] == "Primes"),
         key=lambda row: row["amplification_ratio"],
+    )
+    best_control_g1 = max(
+        (row for row in control_rows if row["depth"] == 1),
+        key=lambda row: row["amplification_ratio"],
+    )
+    best_sweep_g1 = max(
+        (row for row in sweep_rows if row["depth"] == 1),
+        key=lambda row: row["best_lift"],
+    )
+    best_sweep_g2 = max(
+        (row for row in sweep_rows if row["depth"] == 2),
+        key=lambda row: row["best_lift"],
     )
     print(f"Saved plots in {output_dir}")
     print(
@@ -445,6 +678,20 @@ def main() -> None:
         f"G{int(best_motif_row['depth'])} = {best_motif_row['amplification_ratio']:.3f} "
         f"(real overlap {best_motif_row['real_overlap']:.3f}, "
         f"shift mean {best_motif_row['shift_mean']:.3f})"
+    )
+    print(
+        "Strongest G1 family across deterministic controls: "
+        f"{best_control_g1['family']} = {best_control_g1['amplification_ratio']:.3f}"
+    )
+    print(
+        "Strongest sweep G1 lift: "
+        f"{best_sweep_g1['family']} + {best_sweep_g1['transform']} at k={best_sweep_g1['best_k']:.2f} "
+        f"(lift {best_sweep_g1['best_lift']:.3f}, ratio {best_sweep_g1['best_ratio']:.3f})"
+    )
+    print(
+        "Strongest sweep G2 lift: "
+        f"{best_sweep_g2['family']} + {best_sweep_g2['transform']} at k={best_sweep_g2['best_k']:.2f} "
+        f"(lift {best_sweep_g2['best_lift']:.3f}, ratio {best_sweep_g2['best_ratio']:.3f})"
     )
 
 

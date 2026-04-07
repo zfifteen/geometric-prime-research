@@ -145,18 +145,37 @@ to remain measurable after nonlinear maps.
 Generated figures are in
 [`sha256-bounds/out/prime_survival/`](../sha256-bounds/out/prime_survival/).
 
-The most useful figures are:
+### Shift Spectrum
 
-- [Shift spectrum](../sha256-bounds/out/prime_survival/prime_survival_shift_spectrum.png)
-  The real prime pairing at shift `0` stands above most cyclic re-pairings.
-- [Rank transfer at `k = 0.80`](../sha256-bounds/out/prime_survival/prime_survival_rank_transfer_k0_80.png)
-  The real prime pairing shows a diagonal trend that the control panels weaken.
-- [Motif amplification](../sha256-bounds/out/prime_survival/prime_survival_motif_amplification.png)
-  The retained structure is strongest at `G1`, weaker at `G2`, and nearly gone at `G3`.
-- [Stronger controls](../sha256-bounds/out/prime_survival/prime_survival_stronger_controls.png)
-  The SHA family is the strongest `G1` case among the tested deterministic controls.
-- [Family x transform sweep](../sha256-bounds/out/prime_survival/prime_survival_family_transform_sweep.png)
-  The best regimes cluster around `k = 0.45`.
+The real prime pairing at shift `0` stands above most cyclic re-pairings.
+
+![Shift spectrum](../sha256-bounds/out/prime_survival/prime_survival_shift_spectrum.png)
+
+### Rank Transfer at `k = 0.80`
+
+The real prime pairing shows a diagonal trend that the control panels weaken.
+
+![Rank transfer at k = 0.80](../sha256-bounds/out/prime_survival/prime_survival_rank_transfer_k0_80.png)
+
+### Motif Amplification
+
+The retained structure is strongest at `G1`, weaker at `G2`, and nearly gone
+at `G3`.
+
+![Motif amplification](../sha256-bounds/out/prime_survival/prime_survival_motif_amplification.png)
+
+### Stronger Deterministic Controls
+
+The SHA family is the strongest `G1` case among the tested deterministic
+controls.
+
+![Stronger deterministic controls](../sha256-bounds/out/prime_survival/prime_survival_stronger_controls.png)
+
+### Family x Transform Sweep
+
+The best regimes cluster around `k = 0.45`.
+
+![Family x transform sweep](../sha256-bounds/out/prime_survival/prime_survival_family_transform_sweep.png)
 
 ## Exact Scope
 
